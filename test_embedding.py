@@ -1,6 +1,10 @@
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from usearch.index import Index
 import numpy as np
+
+reranker = CrossEncoder(
+    "BAAI/bge-reranker-v2-m3"
+)
 
 model = SentenceTransformer(
     "intfloat/multilingual-e5-base"
@@ -91,28 +95,50 @@ def init():
         if (query == "exit"):
             break
         query = "query: " + query
+
         query_embedding = model.encode(
             query,
             normalize_embeddings=True
-        ).astype(np.float32)
-        exact_scores = model.similarity(
+        )
+
+        matches = index.search(
             query_embedding,
-            post_embeddings
-        )[0]
+            count=10
+        )
 
-        exact_top = exact_scores.argsort(descending=True)[:3]
+        candidate_ids = [match.key for match in matches]
 
-        print("=== Exact ===")
-        for i in exact_top:
-            print(posts[i], exact_scores[i].item())
+        pairs = []
 
-        print("=== ANN ===")
-        matches = index.search(query_embedding, count=3)
+        for post_id in candidate_ids:
+            post = posts[post_id].removeprefix("passage: ")
+            pairs.append([query, post])
 
-        for match in matches:
-            print(posts[match.key], match.distance)
+        rerank_scores = reranker.predict(pairs)
+        results = []
+        for i, post_id in enumerate(candidate_ids):
+            results.append([
+                posts[post_id],
+                rerank_scores[i]
+            ])
+        results.sort(
+            key=lambda x: float(x[1]),
+            reverse=True
+        )
+        for post, score in results[:5]:
+            print(post, score)
+        oldVer(query_embedding)
 
         print("\n\n----------------------------")
+
+
+def oldVer(query_embedding):
+
+    print("=== ANN ===")
+    matches = index.search(query_embedding, count=3)
+
+    for match in matches:
+        print(posts[match.key], match.distance)
 
 
 init()
