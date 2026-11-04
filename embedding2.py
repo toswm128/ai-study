@@ -126,7 +126,7 @@ def evaluate_recall(case_id, k=5):
     query_embedding = model.encode(
         "query: " + query, normalize_embeddings=True).astype(np.float32)
 
-    ann_results = index.search(query_embedding, count=k + 1)
+    ann_results = index.search(query_embedding, count=k*2 + 1)
 
     ann_ids = [
         match.key for match in ann_results
@@ -148,12 +148,57 @@ def evaluate_recall(case_id, k=5):
     print(f"Relevant found: {relevant_found}")
 
     recall = relevant_found / len(relevant_ids) if relevant_ids else 0
-    return str(recall) + "\n\n"
+    print(f"Recall: {recall}\n\n")
+    return recall
 
 
-print(evaluate_recall(0))
+def evaluate_recallWithRerank(case_id, k=5):
+    case = test_cases[case_id]
+    query = case["query"]
 
-print(evaluate_recall(1))
-print(evaluate_recall(2))
-print(evaluate_recall(3))
-print(evaluate_recall(4))
+    relevant_ids = set(case["relevant_ids"]) - {case_id}
+    if not relevant_ids:
+        return None
+
+    query_embedding = model.encode(
+        "query: " + query, normalize_embeddings=True).astype(np.float32)
+
+    ann_results = index.search(query_embedding, count=k*2+1)
+
+    ann_ids = [
+        match.key for match in ann_results
+        if match.key != case_id]
+
+    rerank_pairs = reranker.predict(
+        [
+            [query, test_cases[id]["query"]] for id in ann_ids
+        ]
+    )
+    rerank_pairs_with_ids = list(zip(rerank_pairs, ann_ids))
+
+    rerank_pairs_with_ids.sort(key=lambda x: x[0], reverse=True)
+
+    rerank_pairs_with_ids = rerank_pairs_with_ids[:k]
+
+    retrieved_ids = {id for _, id in rerank_pairs_with_ids}
+    relevant_found = len(relevant_ids.intersection(retrieved_ids))
+    recall = relevant_found / len(relevant_ids) if relevant_ids else 0
+
+    print(f"Query: {query}")
+    print(
+        f"Relevant IDs: {relevant_ids}")
+    for i in relevant_ids:
+        print(f"Relevant {i}: {test_cases[i]['query']}")
+    print()
+    print(
+        f"Retrieved IDs: {retrieved_ids}")
+
+    for i in retrieved_ids:
+        print(f"Relevant found query: {i}: {test_cases[i]["query"]}")
+    print(f"Relevant found: {relevant_found}")
+    print(f"Recall: {recall}\n\n")
+    return recall
+
+
+for i in range(5):
+    print(evaluate_recall(i), evaluate_recallWithRerank(i))
