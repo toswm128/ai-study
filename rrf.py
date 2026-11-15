@@ -6,6 +6,10 @@ import numpy as np
 
 kiwi = Kiwi()
 
+reranker = CrossEncoder(
+    "BAAI/bge-reranker-v2-m3"
+)
+
 model = SentenceTransformer(
     "intfloat/multilingual-e5-base"
 )
@@ -150,22 +154,14 @@ query_tokens = tokenize(query)
 
 scores = bm25.get_scores(query_tokens)
 
+scores = [score for score in scores if score > 0]
 
 ranked_ids = np.argsort(scores)[::-1]
-
-for doc_id in ranked_ids[:k]:
-    print(doc_id, documents[doc_id], scores[doc_id], "\n")
 
 
 ann_list = annEmbeddedQuery(embeddQuery(query), index, k)
 
 ann_ids = [int(match.key) for match in ann_list]
-
-
-for match in ann_list:
-    print(f"{match.key}: {test_cases[match.key]["query"]}, {match.distance}")
-
-print("\n\n\n")
 
 
 def rrf_merge(ann_ids, bm25_ids, rrf_k=60):
@@ -180,8 +176,28 @@ def rrf_merge(ann_ids, bm25_ids, rrf_k=60):
 
     scores.sort(key=lambda x: x[1], reverse=True)
 
-    for id, score in scores:
-        print(f"{id}: {test_cases[id]["query"]} {score}")
+    return scores
 
 
-rrf_merge(ann_ids, ranked_ids)
+def reranking(rrf_results, query):
+
+    candidate_ids = [
+        doc_id for doc_id, _ in rrf_results[:10]
+    ]
+
+    pairs = [[query, test_cases[id]["query"]] for id in candidate_ids]
+
+    rerank_scores = reranker.predict(pairs)
+
+    reranked_results = list(zip(candidate_ids, rerank_scores))
+
+    reranked_results.sort(key=lambda x: x[1], reverse=True)
+
+    for doc_id, score in reranked_results[:5]:
+        print(
+            f"ID: {doc_id}, Query: {test_cases[doc_id]['query']}, Score: {score}")
+
+
+rrf_result = rrf_merge(ann_ids, ranked_ids)
+
+reranking(rrf_result, query)
